@@ -9,7 +9,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-//Soulbout v0.9, Improved help command to represent existing commands. Did code pass & check.
+//Soulbout v0.95, Added mute functionality. Signed off on code. Help command complete for now.
 //Author: Polite
 namespace ProjectSoulbot
 {
@@ -17,6 +17,9 @@ namespace ProjectSoulbot
     {
         //Define and instantiate DiscordClient Object.
         DiscordSocketClient client = new DiscordSocketClient(new DiscordSocketConfig { LogLevel = LogSeverity.Verbose });
+        SocketGuild CoEDiscord; //Guild object representing the CoE Discord Server.
+        private static readonly OverwritePermissions denyOverwrite = new OverwritePermissions(sendMessages: PermValue.Deny, attachFiles: PermValue.Deny); //Channel permissions to mute someone.
+        IRole muted;
 
         //Credentials Variables for reading from creds.txt
         ulong clientID;
@@ -63,7 +66,7 @@ namespace ProjectSoulbot
 
             //Add bot reaction to events.
             client.Log += Log;
-            client.Connected += ModifyStatus;
+            client.Connected += Init;
             client.MessageReceived += MessageReceived;
             client.UserBanned += PostBanMsg;
 
@@ -76,9 +79,22 @@ namespace ProjectSoulbot
         }
 
         //Update bot game.
-        private async Task ModifyStatus()
+        private async Task Init()
         {
             await client.SetGameAsync("Soulbot by Polite");
+            CoEDiscord = client.Guilds.ToImmutableArray<SocketGuild>()[0]; //Set the value of the CoEDiscord object.
+            muted = await CoEDiscord.CreateRoleAsync("Muted", GuildPermissions.None); //Create a muted role.
+            foreach (var toOverwrite in CoEDiscord.TextChannels) //Set the permissions for the muted role to be unable to speak on any text channel.
+            {
+                try
+                {
+                    await toOverwrite.AddPermissionOverwriteAsync(muted, denyOverwrite).ConfigureAwait(false);
+                    await Task.Delay(200).ConfigureAwait(false);
+                } catch
+                {
+                    //Ignored.
+                }
+            }
         }
 
         //Parses commands made to the bot in text channels.
@@ -104,17 +120,21 @@ namespace ProjectSoulbot
                             eb.WithDescription("COMMANDS HELP\n" +
                                                ",help : Displays this message." +
                                                ",ping : Simple command to make the bot say 'Pong!'. Used to confirm the bot is online.\n\n" +
-                                               ",uid : Bot will return the UID of the user who said the command. UID is the unique ID a user possesses for recognition by Discord's backend.\n\n" +
+                                               ",uid %string% : Bot will return the UID of the user who said the command if no %string% is given.\n" +
+                                               "Otherwise it gives the UID of the username given. UID is the unique ID a user possesses for recognition by Discord's backend.\n\n" +
                                                ",amadmin : Bot will tell the user who said the command whether or not they are a bot admin.\n\n" +
                                                ",lad : Bot will list out all the current bot admins including their usernames and UIDs.\n\n" +
                                                ",lbm : Bot will list out all the ban messages and the index of each message. Index is used for deleting ban messages.\n\n" +
+                                               ",lbu : Lists all banned users along with the reason given for their ban.\n\n" +
                                                "ADMIN COMMANDS, Will only run if user is an admin.\n" + 
                                                ",on : Will turn the bot on causing it to process commands and events.\n\n" +
                                                ",off : Will turn the bot off causing it to essentially just sit online till turned back on.\n\n" +
                                                ",aau %uid% : Takes a UID as an argument, will make this user into a bot admin immediately.\n\n" +
                                                ",rma %uid% : Takes a UID as an argument, will remove a bot admin immediately.\n\n" +
                                                ",abm %string% : Adds a ban message to the list of possible messages the bot will say when someone is banned where %string% is the message to add.\n\n" + 
-                                               ",rbm %index% : Removes a ban message with the given index from the list of possible ban messages.");
+                                               ",rbm %index% : Removes a ban message with the given index from the list of possible ban messages.\n\n" +
+                                               ",mute %string% : Adds a role to the user which will mute them from posting in any text channel on the server.\n\n" +
+                                               ",unmute %string% : Unmutes a user if they have been previously muted from posting in any text channel.\n\n");
                             eb.WithColor(info);
                             await m.Channel.SendMessageAsync("", false, eb);
                         }
@@ -127,12 +147,28 @@ namespace ProjectSoulbot
                             await m.Channel.SendMessageAsync("", false, eb);
                         }
                         break;
-                    //Tells the user their uid.
+                    //Tells the user their uid or if a string is given attempts to tell the uid of that user.
                     case ",uid":
                         if (active) //Only perform when on.
                         {
-                            eb.WithDescription(m.Author.Username + " your UID is: " + m.Author.Id); eb.WithColor(info);
-                            await m.Channel.SendMessageAsync("", false, eb);
+                            string usr = m.Content.Substring(spacePos + 1); //Parse out the value part of the command.
+                            if (spacePos == -1)
+                            {
+                                eb.WithDescription(m.Author.Username + " your UID is: " + m.Author.Id); eb.WithColor(info);
+                                await m.Channel.SendMessageAsync("", false, eb);
+                            } else
+                            {
+                                var usrObj = discordContains(usr);
+                                if (usrObj != null)
+                                {
+                                    eb.WithDescription("The UID of " + usr + " is: " + usrObj.Id); eb.WithColor(info);
+                                    await m.Channel.SendMessageAsync("", false, eb);
+                                } else
+                                {
+                                    eb.WithDescription("Improper username provided or user does not exist on this server!"); eb.WithColor(warning);
+                                    await m.Channel.SendMessageAsync("", false, eb);
+                                }
+                            }                            
                         }
                         break;
                     //Tells the user whether the bot considers them an admin.
@@ -166,6 +202,20 @@ namespace ProjectSoulbot
                             for (int i = 0; i < banMsgs.Count; i++)
                             {
                                 msg = msg + "[" + i + "] : " + banMsgs[i] + "\n";
+                            }
+                            eb.WithDescription(msg); eb.WithColor(info);
+                            await m.Channel.SendMessageAsync("", false, eb);
+                        }
+                        break;
+                    //List all banned users along with the reason for being banned.
+                    case ",lbu":
+                        if (active) //Only perform when on.
+                        {
+                            IReadOnlyCollection<Discord.Rest.RestBan> bCollection = await CoEDiscord.GetBansAsync();
+                            string msg = "Banned User List";
+                            foreach (var ban in bCollection)
+                            {
+                                msg = msg + ban.User.Username + ", REASON: " + ban.Reason + "\n";
                             }
                             eb.WithDescription(msg); eb.WithColor(info);
                             await m.Channel.SendMessageAsync("", false, eb);
@@ -281,6 +331,7 @@ namespace ProjectSoulbot
                             }
                         }
                         break;
+                    //Remove a ban message from the bot.
                     case ",rbm":
                         if (isOwner) //Only parse command if the author is an owner.
                         {
@@ -311,6 +362,66 @@ namespace ProjectSoulbot
 
                                     eb.WithDescription("Ban message with index " + index + " has been removed!"); eb.WithColor(ok);
                                     await m.Channel.SendMessageAsync("", false, eb);
+                                }
+                            }
+                        }
+                        break;
+                    //Mute a user.
+                    case ",mute":
+                        if (isOwner) //Only parse command if the author is an owner.
+                        {
+                            if (active) //Only perform when on.
+                            {
+                                string usr = m.Content.Substring(spacePos + 1); //Parse out the value part of the command.
+                                if (spacePos == -1)
+                                {
+                                    eb.WithDescription("No user to be muted was provided! Try again.");
+                                    await m.Channel.SendMessageAsync("", false, eb);
+                                }
+                                else
+                                {
+                                    IGuildUser usrObj = discordContainsGuild(usr);
+                                    if (usrObj != null && !usrObj.RoleIds.ToImmutableList<ulong>().Contains(muted.Id))
+                                    {
+                                        await usrObj.AddRoleAsync(muted).ConfigureAwait(false);
+                                        eb.WithDescription(usrObj.Username + " has been muted.");
+                                        await m.Channel.SendMessageAsync("", false, eb);
+                                    }
+                                    else
+                                    {
+                                        eb.WithDescription("Improper username provided or user does not exist on this server!"); eb.WithColor(warning);
+                                        await m.Channel.SendMessageAsync("", false, eb);
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    //Unmute a user.
+                    case ",unmute":
+                        if (isOwner) //Only parse command if the author is an owner.
+                        {
+                            if (active) //Only perform when on.
+                            {
+                                string usr = m.Content.Substring(spacePos + 1); //Parse out the value part of the command.
+                                if (spacePos == -1)
+                                {
+                                    eb.WithDescription("No user to be unmuted was provided! Try again.");
+                                    await m.Channel.SendMessageAsync("", false, eb);
+                                }
+                                else
+                                {
+                                    IGuildUser usrObj = discordContainsGuild(usr);
+                                    if (usrObj != null && usrObj.RoleIds.ToImmutableList<ulong>().Contains(muted.Id))
+                                    {
+                                        await usrObj.RemoveRoleAsync(muted).ConfigureAwait(false);
+                                        eb.WithDescription(usrObj.Username + " has been unmuted.");
+                                        await m.Channel.SendMessageAsync("", false, eb);
+                                    }
+                                    else
+                                    {
+                                        eb.WithDescription("Improper username provided or user does not exist on this server!"); eb.WithColor(warning);
+                                        await m.Channel.SendMessageAsync("", false, eb);
+                                    }
                                 }
                             }
                         }
@@ -347,6 +458,27 @@ namespace ProjectSoulbot
         {
             Console.WriteLine(msg.ToString());
             return Task.CompletedTask;
+        }
+
+        //Helper function. Returns true if the Discord Guild contains a given user.
+        private IUser discordContains(string u)
+        {
+            IUser returnValue = null;
+            foreach (var user in CoEDiscord.Users)
+            {
+                if (user.Username == u) { returnValue = user; }
+            }
+            return returnValue;
+        }
+
+        private IGuildUser discordContainsGuild(string u)
+        {
+            IGuildUser returnValue = null;
+            foreach (var user in CoEDiscord.Users)
+            {
+                if (user.Username == u) { returnValue = user; }
+            }
+            return returnValue;
         }
     }
 
