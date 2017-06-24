@@ -1,4 +1,5 @@
-﻿using Discord;
+﻿//Include Statements for Discord and System framework.
+using Discord;
 using Discord.WebSocket;
 
 using System;
@@ -8,7 +9,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-//Soulbout v0.7
+//Soulbout v0.9, Improved help command to represent existing commands. Did code pass & check.
 //Author: Polite
 namespace ProjectSoulbot
 {
@@ -40,6 +41,7 @@ namespace ProjectSoulbot
         Color ok = new Color(0, 255, 0);
         Color info = new Color(0, 0, 255);
 
+        //Asynchronous Main Method
         public async Task MainAsync()
         {
             Console.WriteLine("Soulbot v1.0 by Polite");
@@ -82,8 +84,10 @@ namespace ProjectSoulbot
         //Parses commands made to the bot in text channels.
         private async Task MessageReceived(SocketMessage m)
         {
+            //Determine if this message was said in the free channel and if it was said by a bot admin.
             bool isFree = m.Channel.Id == freeChannelID;
             bool isOwner = botOwners.Contains(m.Author.Id);
+            //If the message was said in the free channel or by a bot admin parse it, otherwise waste of time to parse it.
             if (isFree || isOwner)
             {
                 var eb = new EmbedBuilder(); //Prepare embed for message posting.
@@ -98,9 +102,19 @@ namespace ProjectSoulbot
                         if (active) //Bot only responds to help command when on.
                         {
                             eb.WithDescription("COMMANDS HELP\n" +
-                                               ",on : Will turn the bot on causing it to process commands and events.\n" +
-                                               ",off : Will turn the bot off causing it to essentially just sit online till turned back on.\n" +
-                                               ",abm %string% : Adds a ban message to the list of possible messages the bot will say when someone is banned where %string% is the message to add.\n");
+                                               ",help : Displays this message." +
+                                               ",ping : Simple command to make the bot say 'Pong!'. Used to confirm the bot is online.\n\n" +
+                                               ",uid : Bot will return the UID of the user who said the command. UID is the unique ID a user possesses for recognition by Discord's backend.\n\n" +
+                                               ",amadmin : Bot will tell the user who said the command whether or not they are a bot admin.\n\n" +
+                                               ",lad : Bot will list out all the current bot admins including their usernames and UIDs.\n\n" +
+                                               ",lbm : Bot will list out all the ban messages and the index of each message. Index is used for deleting ban messages.\n\n" +
+                                               "ADMIN COMMANDS, Will only run if user is an admin.\n" + 
+                                               ",on : Will turn the bot on causing it to process commands and events.\n\n" +
+                                               ",off : Will turn the bot off causing it to essentially just sit online till turned back on.\n\n" +
+                                               ",aau %uid% : Takes a UID as an argument, will make this user into a bot admin immediately.\n\n" +
+                                               ",rma %uid% : Takes a UID as an argument, will remove a bot admin immediately.\n\n" +
+                                               ",abm %string% : Adds a ban message to the list of possible messages the bot will say when someone is banned where %string% is the message to add.\n\n" + 
+                                               ",rbm %index% : Removes a ban message with the given index from the list of possible ban messages.");
                             eb.WithColor(info);
                             await m.Channel.SendMessageAsync("", false, eb);
                         }
